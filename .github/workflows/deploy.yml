@@ -1,0 +1,70 @@
+name: Terraform Infra Deploy
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./
+
+    steps:
+      # 1. Clonar repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Credenciales AWS
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      # 3. Crear bucket si no existe (BOOTSTRAP)
+      - name: Ensure S3 backend exists
+        run: |
+          BUCKET="bucketyacreado-para-state-jeissonherrera"
+
+          if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+            echo "Bucket ya existe"
+          else
+            echo "Creando bucket..."
+            aws s3api create-bucket --bucket "$BUCKET" --region us-east-1
+
+            echo "Habilitando versioning..."
+            aws s3api put-bucket-versioning \
+              --bucket "$BUCKET" \
+              --versioning-configuration Status=Enabled
+          fi
+
+      # 4. Instalar Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # 5. Inicializar (ya con bucket existente)
+      - name: Terraform Init
+        run: terraform init
+
+      # 6. Formato
+      - name: Terraform Format
+        run: terraform fmt -check
+
+      # 7. Validación
+      - name: Terraform Validate
+        run: terraform validate
+
+      # 8. Plan (en PR)
+      - name: Terraform Plan
+        if: github.event_name == 'pull_request'
+        run: terraform plan
+
+      # 9. Apply (solo en main)
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve
